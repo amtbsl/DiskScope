@@ -2,7 +2,8 @@
 set -euo pipefail
 cd "${0:A:h}/.."
 mkdir -p build/DiskScope.app/Contents/MacOS build/DiskScope.app/Contents/Resources
-xcrun swiftc -O -swift-version 5 Sources/Core.swift Sources/Services.swift Sources/main.swift -o build/DiskScope.app/Contents/MacOS/DiskScope -framework AppKit -framework WebKit -framework IOKit
+# Keep the executable's deployment target consistent with Info.plist.
+xcrun swiftc -O -swift-version 5 -target "$(uname -m)-apple-macosx13.0" Sources/Core.swift Sources/Services.swift Sources/main.swift -o build/DiskScope.app/Contents/MacOS/DiskScope -framework AppKit -framework WebKit -framework IOKit
 cp -R web build/DiskScope.app/Contents/Resources/
 cp LICENSE build/DiskScope.app/Contents/Resources/LICENSE
 cat > build/DiskScope.app/Contents/Info.plist <<'PLIST'
