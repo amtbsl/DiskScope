@@ -24,6 +24,8 @@ Built with Swift, AppKit, and a local WebKit interface. All implemented features
 
 ## Build and run
 
+Download the ready-to-use Apple Silicon macOS app from [GitHub Releases](https://github.com/amtbsl/DiskScope/releases/latest). Open the DMG and drag DiskScope into Applications, or extract the ZIP. Release builds are ad hoc signed and not Apple-notarized; see the release notes for installation details.
+
 Requirements:
 
 - macOS 13 or later.
@@ -91,6 +93,8 @@ zsh scripts/test.sh
 ```
 
 This builds the app, runs scanner and treemap regressions, checks JavaScript syntax, samples real system metrics, and exercises a reversible Trash round trip with a newly created UUID-named test file. It does not delete existing personal files. See [validation notes](docs/VALIDATION.md) for manual checks and unverified cases.
+
+To package a local release for your Mac's architecture, run `zsh scripts/release.sh`. It creates a DMG, a ZIP, and SHA-256 checksums under `build/releases/`.
 
 ## Project origin
 

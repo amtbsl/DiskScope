@@ -24,6 +24,8 @@ DiskScope 是一款在本机运行的 macOS 磁盘分析与清理应用。通过
 
 ## 构建与运行
 
+可直接从 [GitHub Releases](https://github.com/amtbsl/DiskScope/releases/latest) 下载 Apple Silicon macOS 版本。打开 DMG 后，将 DiskScope 拖入 Applications；也可以解压 ZIP 使用。发布包采用临时签名，未经过 Apple 公证，首次打开的说明见发布页面。
+
 环境要求：
 
 - macOS 13 或更新版本。
@@ -91,6 +93,8 @@ zsh scripts/test.sh
 ```
 
 脚本构建应用，执行扫描与树图回归测试、JavaScript 语法检查、真实系统状态采集，以及专用 UUID 文件的废纸篓移入与恢复测试。不会删除已有个人文件。手动检查和未验证情况见 [验收记录](docs/VALIDATION.md)。
+
+运行 `zsh scripts/release.sh` 可为当前 Mac 的架构打包发布版本，在 `build/releases/` 下生成 DMG、ZIP 和 SHA-256 校验文件。
 
 ## 项目来源
 
