@@ -1,0 +1,127 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'none'; object-src 'none'; base-uri 'none'"
+    />
+    <title>DiskScope</title>
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body data-theme="dark">
+    <header>
+      <button class="brand" id="homeView">
+        <span data-icon="drive"></span><strong>DiskScope</strong>
+      </button>
+      <div class="searchBox">
+        <span data-icon="search"></span
+        ><input
+          id="search"
+          type="search"
+          placeholder="Quick power search..."
+          aria-label="Quick power search"
+        /><select id="scope" aria-label="Search scope">
+          <option value="scan">Current Scan</option>
+          <option value="home">Home</option>
+          <option value="mac">Full Mac</option>
+        </select>
+      </div>
+      <nav>
+        <button id="appsView"><span data-icon="apps"></span>Apps</button
+        ><button
+          id="monitorView"
+          title="System Monitor"
+          aria-label="System Monitor"
+        >
+          <span data-icon="pulse"></span></button
+        ><button id="themeView" title="Change Theme" aria-label="Change Theme">
+          <span data-icon="palette"></span></button
+        ><button id="queueView" class="gold">
+          <span data-icon="trash"></span>Queue <b id="queueCount">0</b>
+        </button>
+      </nav>
+    </header>
+    <div class="notice">
+      <span data-icon="shield"></span
+      ><span>All features included · Files stay on your Mac</span
+      ><button id="permissions">Full Disk Access</button
+      ><span class="shortcut">⌘F Search</span>
+    </div>
+    <div class="workspace">
+      <aside>
+        <section class="scanActions">
+          <button id="scanMac" class="primary">
+            <span data-icon="drive"></span>Scan Full Mac</button
+          ><button id="scanHome"><span data-icon="home"></span>Scan Home</button
+          ><button id="choose">
+            <span data-icon="folder"></span>Choose Folder
+          </button>
+        </section>
+        <section class="storage">
+          <h3>DISK STORAGE</h3>
+          <div class="storageGrid">
+            <div class="ring" id="ring">
+              <div>
+                <span data-icon="drive"></span
+                ><strong id="diskPercent">—</strong>
+              </div>
+            </div>
+            <dl>
+              <dt>Total</dt>
+              <dd id="diskTotal">—</dd>
+              <dt>Used</dt>
+              <dd class="orange" id="diskUsed">—</dd>
+              <dt>Available</dt>
+              <dd class="green" id="diskFree">—</dd>
+            </dl>
+          </div>
+          <div class="storageBar"><i id="diskBar"></i></div>
+          <div class="trashLine">
+            <span data-icon="trash"></span
+            ><span>Trash <b id="trashCount">—</b></span
+            ><button class="danger small" id="emptyTrash">Empty</button>
+          </div>
+        </section>
+        <section class="filters">
+          <h3>
+            <span data-icon="code"></span>DEV BLOAT FILTERS
+            <button id="clearFilters" title="Clear filters">Reset</button>
+          </h3>
+          <div id="filterList"></div>
+        </section>
+        <section class="legend">
+          <h3>FILE TYPES</h3>
+          <div id="legendList"></div>
+        </section>
+        <footer>DiskScope v1.0.0 <span>Local · All features</span></footer>
+      </aside>
+      <main id="main">
+        <div class="welcome">
+          <div class="heroIcon" data-icon="drive"></div>
+          <h1>DiskScope</h1>
+          <p>Visualize your disk usage with an interactive treemap.</p>
+          <div class="welcomeActions">
+            <button class="primary" id="welcomeScan">
+              <span data-icon="home"></span>Scan Home Folder</button
+            ><button id="welcomeChoose">
+              <span data-icon="folder"></span>Choose Folder
+            </button>
+          </div>
+          <div class="welcomeMeta">
+            Storage map · Power search · App cleanup · Live monitor
+          </div>
+        </div>
+      </main>
+    </div>
+    <div id="overlay" hidden>
+      <div id="dialog" role="dialog" aria-modal="true"></div>
+    </div>
+    <div id="tooltip" hidden></div>
+    <div id="context" hidden></div>
+    <div id="toast" role="status" hidden></div>
+    <script src="treemap.js"></script>
+    <script src="app.js"></script>
+  </body>
+</html>
