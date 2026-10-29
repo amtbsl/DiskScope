@@ -115,6 +115,7 @@ let view = "home",
   scanTimer = null,
   monitorTimer = null,
   apps = [];
+let reclaimToken = 0;
 const nodeRegistry = new Map();
 let queue = [];
 try {
@@ -155,12 +156,16 @@ function register(entry) {
 function switching(next) {
   clearTimeout(mapClickTimer);
   view = next;
+  ++searchToken;
+  ++appToken;
+  ++reclaimToken;
   clearInterval(monitorTimer);
   monitorTimer = null;
   $("#tooltip").hidden = true;
   $("#context").hidden = true;
   $("#appsView").classList.toggle("active", next === "apps");
   $("#monitorView").classList.toggle("active", next === "monitor");
+  $("#reclaimView").classList.toggle("active", next === "reclaim");
 }
 function displayLoading(title, sub = "") {
   $("#main").innerHTML =
@@ -542,7 +547,7 @@ function selectEntry(entry) {
   drawMap();
 }
 function fileTable(rows, checkbox = false) {
-  return `<table class="fileTable"><thead><tr>${checkbox ? "<th></th>" : ""}<th>NAME</th><th>SIZE ON DISK</th><th>TYPE</th><th></th></tr></thead><tbody>${rows.map((e, i) => `<tr data-row="${i}">${checkbox ? `<td><input type="checkbox" data-check="${i}" ${e.shared ? "" : "checked"} aria-label="Select ${escapeHTML(e.name)}"></td>` : ""}<td class="name"><button data-row-open="${i}" title="${escapeHTML(e.path)}">${e.directory ? "▸ " : ""}${escapeHTML(e.name)}</button><span class="path">${escapeHTML(e.path)}</span></td><td class="num">${fmt(e.size)}</td><td>${escapeHTML(e.kind || (e.directory ? "Folder" : e.category) || "File")}</td><td class="actions"><button data-row-reveal="${i}" title="Reveal in Finder">${icon("eye")}</button>${checkbox ? "" : `<button data-row-queue="${i}" title="Add to cleanup queue">${icon("plus")}</button>`}</td></tr>`).join("")}</tbody></table>`;
+  return `<table class="fileTable"><thead><tr>${checkbox ? "<th></th>" : ""}<th>NAME</th><th>SIZE ON DISK</th><th>TYPE</th><th></th></tr></thead><tbody>${rows.map((e, i) => `<tr data-row="${i}">${checkbox ? `<td><input type="checkbox" data-check="${i}" ${DiskScopeUI.defaultRelatedSelection(e) ? "checked" : ""} aria-label="Select ${escapeHTML(e.name)}"></td>` : ""}<td class="name"><button data-row-open="${i}" title="${escapeHTML(e.path)}">${e.directory ? "▸ " : ""}${escapeHTML(e.name)}</button><span class="path">${escapeHTML(e.path)}</span>${e.evidence || e.reason ? `<span class="rowEvidence">${escapeHTML(e.evidence || e.reason)}</span>` : ""}</td><td class="num">${e.sizeKnown === false ? "Unknown" : fmt(e.size)}</td><td>${escapeHTML(e.kind || (e.directory ? "Folder" : e.category) || "File")}${e.shared || e.system || e.uncertain || e.confidence === "low" || e.limited ? `<small class="rowFlags">${[e.shared ? "Shared" : "", e.system ? "System" : "", e.uncertain || e.confidence === "low" ? "Uncertain" : "", e.limited ? "Partial size" : ""].filter(Boolean).join(" · ")}</small>` : ""}</td><td class="actions"><button data-row-reveal="${i}" title="Reveal in Finder">${icon("eye")}</button>${checkbox ? "" : `<button data-row-queue="${i}" title="Add to cleanup queue">${icon("plus")}</button>`}</td></tr>`).join("")}</tbody></table>`;
 }
 let tableRows = [];
 function bindRows(rows = browseData?.children || []) {
@@ -656,7 +661,10 @@ async function showSearch(large = false) {
     };
     bindRows(result.rows);
   } catch (e) {
-    if (token === searchToken) error(e);
+    if (token !== searchToken || view !== "search") return;
+    $("#main").innerHTML = `<div class="page"><h1>Search unavailable</h1><p class="warning">${escapeHTML(e.message || e)}</p><div class="toolbar"><button id="retrySearch">Try Again</button><button id="returnMap">Back to map</button></div></div>`;
+    $("#retrySearch").onclick = () => showSearch(large);
+    $("#returnMap").onclick = () => scanRoot ? browse(currentNode) : showWelcome();
   }
 }
 async function exportReport() {
@@ -737,6 +745,8 @@ const themes = [
   ["forest", "Forest", "#192c26", "#eef8f1"],
   ["purple", "Amethyst", "#251d32", "#f6edff"],
   ["sunset", "Sunset", "#302420", "#fff4e7"],
+  ["aurora", "Aurora", "#edf1fb", "#29334a"],
+  ["ocean", "Ocean", "#122b40", "#ecf7ff"],
 ];
 function showThemes() {
   dialog(
@@ -756,6 +766,7 @@ function showThemes() {
       (b.onclick = () => {
         document.body.dataset.theme = b.dataset.themeChoice;
         localStorage.setItem("theme", b.dataset.themeChoice);
+        native("appearance", { theme: document.body.dataset.theme }).catch(error);
         closeDialog();
         drawMap();
       }),
@@ -768,17 +779,25 @@ function showPermissions() {
   $("#openSettings").onclick = () => native("permissions").catch(error);
 }
 let appTab = "installed",
-  related = [];
+  related = [],
+  selectedAppPath = "",
+  appsLoadToken = 0;
 async function showApps() {
   switching("apps");
   appTab = "installed";
   displayLoading("Apps Manager", "Finding installed applications...");
+  const token = ++appToken, loadToken = ++appsLoadToken;
   try {
-    apps = await native("apps");
-    if (view !== "apps") return;
+    const result = await native("apps");
+    if (token !== appToken || loadToken !== appsLoadToken || view !== "apps") return;
+    apps = result;
+    selectedAppPath = "";
     renderApps();
   } catch (e) {
-    error(e);
+    if (token !== appToken || view !== "apps") return;
+    $("#main").innerHTML = `<div class="page"><h1>Apps Manager</h1><p class="warning">${escapeHTML(e.message || e)}</p><div class="toolbar"><button id="retryApps">Try Again</button><button id="appsHome">Back to storage</button></div></div>`;
+    $("#retryApps").onclick = showApps;
+    $("#appsHome").onclick = () => scanRoot ? browse(currentNode) : showWelcome();
   }
 }
 function renderApps() {
@@ -804,7 +823,7 @@ function renderAppList(query = "") {
     .filter((a) => a.name.toLowerCase().includes(query.toLowerCase()))
     .map(
       (a) =>
-        `<button class="appItem" data-app="${escapeHTML(a.path)}"><span class="appBadge">${icon("apps")}</span><span>${escapeHTML(a.name)}<small>${escapeHTML(a.bundleID)} · ${escapeHTML(a.version)}</small></span></button>`,
+        `<button class="appItem${selectedAppPath === a.path ? " active" : ""}" data-app="${escapeHTML(a.path)}"><span class="appBadge">${icon("apps")}</span><span>${escapeHTML(a.name)}<small>${escapeHTML(a.bundleID)} · ${escapeHTML(a.version)}</small></span></button>`,
     )
     .join("");
   $$("[data-app]").forEach(
@@ -812,9 +831,36 @@ function renderAppList(query = "") {
       (b.onclick = () => selectApp(apps.find((a) => a.path === b.dataset.app))),
   );
 }
+async function refreshInstalledApps(previousApp, token) {
+  const loadToken = ++appsLoadToken;
+  const refreshed = await native("apps");
+  if (loadToken !== appsLoadToken) return;
+  apps = refreshed;
+  if (view !== "apps") return;
+  // A completed removal must update the count even if the user has selected a
+  // different app meanwhile. Only the original details request may replace it.
+  $("#installedTab").textContent = `Installed Apps (${apps.length})`;
+  if (appTab !== "installed") return;
+  const query = $("#appSearch").value;
+  if (token !== appToken || selectedAppPath !== previousApp.path) {
+    renderAppList(query);
+    return;
+  }
+  renderApps();
+  $("#appSearch").value = query;
+  renderAppList(query);
+  const remainingApp = apps.find(item => item.path === previousApp.path);
+  if (remainingApp) await selectApp(remainingApp);
+  else {
+    selectedAppPath = "";
+    $("#appDetails").innerHTML = `<div class="emptyResult"><h2>${escapeHTML(previousApp.name)} was removed</h2><p>The installed app list is refreshed. Review any remaining support files in Leftover Cleanup.</p><button id="reviewRemaining">Review Leftovers</button></div>`;
+    $("#reviewRemaining").onclick = () => $("#orphansTab").onclick();
+  }
+}
 async function selectApp(app) {
   if (!app) return;
   const token = ++appToken;
+  selectedAppPath = app.path;
   $$("[data-app]").forEach((b) =>
     b.classList.toggle("active", b.dataset.app === app.path),
   );
@@ -824,8 +870,9 @@ async function selectApp(app) {
     const rows = await native("appDetails", { path: app.path });
     if (token !== appToken || view !== "apps" || appTab !== "installed") return;
     related = rows;
+    const discoveryWarnings = [...new Set(rows.flatMap(row => Array.isArray(row.warnings) ? row.warnings : []))];
     $("#appDetails").innerHTML =
-      `<h2>${escapeHTML(app.name)}</h2><p>${escapeHTML(app.bundleID)} · ${escapeHTML(app.version)}<br>Matched by exact application name, bundle identifier and declared groups. Shared groups are unchecked; review them before selecting.</p>${fileTable(rows, true)}<div class="appActions"><strong id="appTotal">${fmt(rows.filter((e) => !e.shared).reduce((s, e) => s + e.size, 0))}</strong><button class="danger" id="uninstall">${icon("trash")}Uninstall Selected</button></div><p>Quit the app before uninstalling. Removal moves selected items to the Trash. Reinstalling an app does not restore discarded app data automatically.${rows.some((e) => e.skipped) ? "<br>Some paths were inaccessible. Full Disk Access may be needed." : ""}</p>`;
+      `<h2>${escapeHTML(app.name)}</h2><p>${escapeHTML(app.bundleID)} · ${escapeHTML(app.version)}<br>Matched by exact application name, bundle identifier and declared groups. Shared, system and uncertain items are unchecked; review the ownership evidence before selecting.</p>${rows.some(row => row.discoveryLimited) ? '<p class="warning">Partial discovery: the inspection limit was reached. Some associated files may be missing.</p>' : ""}${discoveryWarnings.map(warning => `<p class="warning">${escapeHTML(warning)}</p>`).join("")}${fileTable(rows, true)}<div class="appActions"><strong id="appTotal">${fmt(rows.filter(DiskScopeUI.defaultRelatedSelection).reduce((s, e) => s + e.size, 0))}</strong><button class="danger" id="uninstall">${icon("trash")}Uninstall Selected</button></div><p>Quit the app before uninstalling. Removal moves selected items to the Trash. Reinstalling an app does not restore discarded app data automatically.${rows.some((e) => e.skipped) ? "<br>Some paths were inaccessible. Full Disk Access may be needed." : ""}</p>`;
     bindRows(rows);
     $$("[data-check]").forEach(
       (c) =>
@@ -835,10 +882,63 @@ async function selectApp(app) {
           );
         }),
     );
-    $("#uninstall").onclick = () =>
-      trashRows(checkedRows(rows), () => selectApp(app));
+    $("#uninstall").onclick = () => {
+      const selectionToken = appToken;
+      return trashRows(checkedRows(rows), (result) =>
+        result.moved.length ? refreshInstalledApps(app, selectionToken) : undefined);
+    };
   } catch (e) {
-    error(e);
+    if (token !== appToken || view !== "apps" || appTab !== "installed") return;
+    $("#appDetails").innerHTML = `<h2>${escapeHTML(app.name)}</h2><p class="warning">${escapeHTML(e.message || e)}</p><button id="retryAppDetails">Try Again</button>`;
+    $("#retryAppDetails").onclick = () => selectApp(app);
+  }
+}
+async function showReclaim() {
+  switching("reclaim");
+  resetSelection();
+  const token = ++reclaimToken;
+  if (!scanRoot) {
+    $("#main").innerHTML = `<div class="page reclaim"><h1>Quick Reclaim</h1><p class="subtitle">Review caches, dependencies and build outputs from your current scan.</p><div class="emptyResult"><h2>Scan a folder first</h2><p>Recommendations use measured files from a completed scan. Start with your Home folder or choose a project folder.</p><div class="welcomeActions"><button class="primary" id="reclaimScan">${icon("home")}Scan Home</button><button id="reclaimChoose">${icon("folder")}Choose Folder</button></div></div></div>`;
+    $("#reclaimScan").onclick = () => startScan("home");
+    $("#reclaimChoose").onclick = () => startScan("", true);
+    return;
+  }
+  displayLoading("Finding files to review…", "Checking caches, dependencies and build outputs in the current scan.");
+  try {
+    const responses = await Promise.allSettled(DiskScopeUI.reclaimGroups.map(group =>
+      native("search", { query: "", filters: [group.tag], type: "", scope: "scan", large: false })));
+    if (token !== reclaimToken || view !== "reclaim") return;
+    const reports = responses.filter(item => item.status === "fulfilled").map(item => item.value);
+    const failures = responses.filter(item => item.status === "rejected");
+    const rows = DiskScopeUI.reclaimCandidates(reports);
+    const reportsWithMetadata = reports.map(DiskScopeUI.report);
+    const partial = browseData?.limited || browseData?.skipped > 0 || failures.length > 0 ||
+      reportsWithMetadata.some((report, index) => report.limited || (reports[index].total || 0) > report.rows.length);
+    const total = rows.reduce((sum, row) => sum + row.size, 0);
+    $("#main").innerHTML = `<div class="page reclaim"><h1>Quick Reclaim</h1><p class="subtitle">Suggestions to review, based on allocated bytes in ${escapeHTML(scanRoot)}.</p><div class="toolbar"><button id="reclaimMap">${icon("drive")}Back to map</button><button id="reclaimRefresh">${icon("refresh")}Refresh Suggestions</button><button id="reclaimRescan">Rescan Folder</button></div><div class="reclaimSummary"><strong>${fmt(total)}</strong><span>in ${rows.length} review candidates · nested files counted once</span></div><p class="reviewNotice">Nothing is selected. Review each path and close apps using these files. Dependencies may need downloading and builds may need rebuilding. Adding items opens your cleanup queue for a separate review.</p>${partial ? '<p class="warning">Partial results: the scan contains inaccessible paths, reached a limit, or some recommendation searches were incomplete. These totals cover only the suggestions shown.</p>' : ""}${failures.length ? `<p class="warning">${failures.length} recommendation group(s) could not be checked. Refresh to try again.</p>` : ""}${reportsWithMetadata.flatMap(report => report.warnings).map(warning => `<p class="warning">${escapeHTML(warning)}</p>`).join("")}<div class="reclaimGroups">${DiskScopeUI.reclaimGroups.map(group => `<div><strong>${escapeHTML(group.name)}</strong><p>${escapeHTML(group.note)}</p></div>`).join("")}</div>${rows.length ? `<table class="fileTable"><thead><tr><th></th><th>REVIEW PATH</th><th>SIZE ON DISK</th><th>GROUP</th><th></th></tr></thead><tbody>${rows.map((row, index) => `<tr><td><input type="checkbox" data-reclaim-check="${index}" aria-label="Review ${escapeHTML(row.name)}"></td><td class="name">${escapeHTML(row.name)}<span class="path">${escapeHTML(row.path)}</span></td><td class="num">${fmt(row.size)}</td><td>${row.reclaimGroups.map(escapeHTML).join(" · ")}</td><td class="actions"><button data-reclaim-reveal="${index}" title="Reveal in Finder">${icon("eye")}</button></td></tr>`).join("")}</tbody></table>` : `<div class="emptyResult">${failures.length === responses.length ? "Suggestions could not be loaded. Refresh to try again, or return to your map." : "No cache, dependency or build-output candidates were found in the accessible scan. Choose another folder or use the map to inspect other file types."}</div>`}<div class="dialogFooter"><span class="total" id="reclaimTotal">0 items selected · 0 B</span><button class="primary" id="queueReclaim" disabled>${icon("plus")}Add Selected to Review Queue</button></div></div>`;
+    $("#reclaimMap").onclick = () => browse(currentNode);
+    $("#reclaimRefresh").onclick = showReclaim;
+    $("#reclaimRescan").onclick = () => startScan(scanRoot);
+    const chosen = () => $$("[data-reclaim-check]").filter(input => input.checked)
+      .map(input => rows[Number(input.dataset.reclaimCheck)]).filter(Boolean);
+    $$("[data-reclaim-check]").forEach(input => input.onchange = () => {
+      const selection = chosen();
+      $("#reclaimTotal").textContent = `${selection.length} items selected · ${fmt(selection.reduce((sum, row) => sum + row.size, 0))}`;
+      $("#queueReclaim").disabled = !selection.length;
+    });
+    $$("[data-reclaim-reveal]").forEach(button => button.onclick = () =>
+      native("reveal", { path: rows[Number(button.dataset.reclaimReveal)].path }).catch(error));
+    $("#queueReclaim").onclick = () => {
+      const selection = chosen();
+      if (!selection.length) return toast("Select at least one item to review");
+      selection.forEach(addQueue);
+      showQueue();
+    };
+  } catch (e) {
+    if (token !== reclaimToken || view !== "reclaim") return;
+    $("#main").innerHTML = `<div class="page reclaim"><h1>Quick Reclaim</h1><p class="warning">${escapeHTML(e.message || e)}</p><div class="toolbar"><button id="reclaimRetry">Try Again</button><button id="reclaimMap">Back to map</button></div></div>`;
+    $("#reclaimRetry").onclick = showReclaim;
+    $("#reclaimMap").onclick = () => browse(currentNode);
   }
 }
 function checkedRows(rows) {
@@ -858,7 +958,7 @@ async function trashRows(rows, after) {
       `${r.moved.length} items moved to Trash${r.failures.length ? " · " + r.failures.map((e) => e.error).join("; ") : ""}`,
     );
     disk();
-    if (after) after();
+    if (after) await after(r);
   } catch (e) {
     error(e);
   }
@@ -868,11 +968,12 @@ async function loadOrphans() {
   $("#appsBody").innerHTML =
     '<div class="loading"><div class="spinner"></div><p>Checking bundle identifiers against installed apps and Spotlight...</p></div>';
   try {
-    const rows = await native("orphans");
+    const report = DiskScopeUI.report(await native("orphans"));
     if (token !== appToken || view !== "apps" || appTab !== "orphans") return;
+    const rows = report.rows;
     related = rows;
     $("#appsBody").innerHTML =
-      `<p class="subtitle">${rows.length} leftover candidates. Matches are heuristic; portable apps or incomplete Spotlight indexing may produce false positives. No items are preselected.</p>${rows.length ? fileTable(rows, true) : '<div class="emptyResult">No leftover candidates found in accessible Library folders.</div>'}<div class="dialogFooter"><button id="queueOrphans">Add Selected to Queue</button><button class="danger" id="trashOrphans">Move Selected to Trash</button></div>`;
+      `<p class="subtitle">${rows.length} leftover candidates. Matches are heuristic; portable apps or incomplete Spotlight indexing may produce false positives. No items are preselected.</p>${report.limited ? '<p class="warning">Partial results: candidate or inspection limits were reached.</p>' : ""}${report.warnings.map(w => `<p class="warning">${escapeHTML(w)}</p>`).join("")}${rows.length ? fileTable(rows, true) : '<div class="emptyResult">No leftover candidates found in accessible Library folders. Inaccessible or unindexed locations may contain other files.</div>'}<div class="dialogFooter"><button id="queueOrphans">Add Selected to Queue</button><button class="danger" id="trashOrphans">Move Selected to Trash</button></div>`;
     $$("[data-check]").forEach((c) => (c.checked = false));
     bindRows(rows);
     $("#queueOrphans").onclick = () => {
@@ -882,24 +983,22 @@ async function loadOrphans() {
     $("#trashOrphans").onclick = () =>
       trashRows(checkedRows(rows), loadOrphans);
   } catch (e) {
-    error(e);
+    if (token !== appToken || view !== "apps" || appTab !== "orphans") return;
+    $("#appsBody").innerHTML = `<p class="warning">${escapeHTML(e.message || e)}</p><p>No conclusion can be drawn about leftover files. Try again or return to Installed Apps.</p><button id="retryOrphans">Try Again</button>`;
+    $("#retryOrphans").onclick = loadOrphans;
   }
 }
-const history = { cpu: [], down: [], up: [] };
+const history = { user: [], system: [], down: [], up: [] };
 let monitorBusy = false;
-function chart(values, color, max = 100) {
-  if (!values.length) return "";
-  const data = [
-    ...Array(Math.max(0, 60 - values.length)).fill(0),
-    ...values,
-  ].slice(-60);
-  const pts = data
-    .map(
-      (v, i) =>
-        `${(i / 59) * 300},${70 - Math.min(1, v / Math.max(1, max)) * 65}`,
-    )
-    .join(" ");
-  return `<svg class="spark" viewBox="0 0 300 75" preserveAspectRatio="none"><polygon points="0,75 ${pts} 300,75" fill="${color}18"/><polyline points="${pts}" fill="none" stroke="${color}" stroke-width="2"/></svg>`;
+function chart(series, max = 100, label = "Activity history") {
+  if (!series.some(item => item.values.length)) return "";
+  const lines = series.map(({ values, color, name }) => {
+    const data = [...Array(Math.max(0, 60 - values.length)).fill(0), ...values].slice(-60);
+    const pts = data.map((value, i) =>
+      `${(i / 59) * 300},${70 - Math.min(1, Math.max(0, Number(value) || 0) / Math.max(1, max)) * 65}`).join(" ");
+    return `<polyline data-series="${escapeHTML(name)}" points="${pts}" fill="none" stroke="${color}" stroke-width="2"/>`;
+  }).join("");
+  return `<svg class="spark" viewBox="0 0 300 75" preserveAspectRatio="none" role="img" aria-label="${escapeHTML(label)}">${lines}</svg>`;
 }
 function showMonitor() {
   switching("monitor");
@@ -914,16 +1013,18 @@ async function monitorSample() {
   try {
     const m = await native("monitor");
     if (view !== "monitor") return;
-    history.cpu.push(m.cpu);
+    history.user.push(m.user);
+    history.system.push(m.system);
     history.down.push(m.download);
     history.up.push(m.upload);
     for (const key in history) history[key] = history[key].slice(-60);
     $("#machine").textContent =
       `${m.chip} · ${m.cores} Cores · ${fmtMemory(m.totalMemory)} Memory`;
+    const battery = DiskScopeUI.batteryMetrics(m.power);
     const percent = Math.round((m.memory / m.totalMemory) * 100),
       app = Math.max(0, m.memory - m.wired - m.compressed);
     $("#monitorBody").innerHTML =
-      `<div class="cards"><div class="card"><h3><span style="color:var(--blue-soft)">${icon("cpu")}</span>CPU LOAD</h3><div class="metric">${m.cpu.toFixed(1)}%</div><p><span style="color:var(--blue-soft)">User: ${m.user.toFixed(1)}%</span> <span style="color:var(--red)">Sys: ${m.system.toFixed(1)}%</span></p>${chart(history.cpu, "#3b82f6")}</div><div class="card"><h3><span style="color:var(--purple)">${icon("drive")}</span>MEMORY</h3><div class="metric">${fmtMemory(m.memory)}</div><p>of ${fmtMemory(m.totalMemory)} (${percent}%)</p><div class="memoryBar"><i style="width:${(app / m.totalMemory) * 100}%;background:#a855f7"></i><i style="width:${(m.wired / m.totalMemory) * 100}%;background:#3b82f6"></i><i style="width:${(m.compressed / m.totalMemory) * 100}%;background:#fb923c"></i></div><div class="breakdown"><span><em class="app">App</em> ${fmtMemory(app)}</span><span><em class="wired">Wired</em> ${fmtMemory(m.wired)}</span><span><em class="cached">Cached</em> ${fmtMemory(m.cached)}</span><span><em class="free">Free</em> ${fmtMemory(m.free)}</span><span><em class="compressed">Compressed</em> ${fmtMemory(m.compressed)}</span><span><em class="swap">Swap</em> ${fmtMemory(m.swap)}</span></div></div><div class="card"><h3><span style="color:var(--green)">${icon("wifi")}</span>NETWORK</h3><div class="netLine"><span class="green">↓ DOWNLOAD</span><strong>${fmt(m.download, true)}</strong></div><div class="netLine"><span style="color:var(--blue-soft)">↑ UPLOAD</span><strong>${fmt(m.upload, true)}</strong></div>${chart(history.down, "#4ade80", Math.max(1024, ...history.down))}<p>Physical en* interfaces</p></div><div class="card"><h3><span style="color:var(--amber)">${icon("power")}</span>POWER</h3><div class="powerMetric">${m.power.percent == null ? "—" : Math.round(m.power.percent) + "%"}</div><p style="text-align:center">${m.power.source === "AC Power" ? "AC Powered" : m.power.source === "Battery Power" ? "On Battery" : escapeHTML(m.power.source)}${m.power.charging ? " · Charging" : ""}</p></div></div><div class="processes"><h3>${icon("pulse")} Top Processes (by CPU)</h3><table class="fileTable"><thead><tr><th>PROCESS</th><th>CPU</th><th>MEMORY</th><th>PID</th></tr></thead><tbody>${m.processes.map((p, i) => `<tr><td><span class="rank">${i + 1}</span>${escapeHTML(p.name)}</td><td class="num">${p.cpu.toFixed(1)}%</td><td style="color:var(--purple)">${fmtMemory(p.memory)}</td><td style="color:var(--muted)">${p.pid}</td></tr>`).join("")}</tbody></table><p class="subtitle" style="margin-top:18px;font-size:11px">CPU is sampled between refreshes. Process CPU is reported by macOS ps and may exceed 100% for multiple cores. Memory is an estimate excluding reclaimable cached pages.</p></div>`;
+      `<div class="cards"><div class="card"><h3><span style="color:var(--blue-soft)">${icon("cpu")}</span>CPU LOAD</h3><div class="metric">${m.cpu.toFixed(1)}%</div><p><span style="color:var(--blue-soft)">User: ${m.user.toFixed(1)}%</span> <span style="color:var(--red)">Sys: ${m.system.toFixed(1)}%</span></p>${chart([{values: history.user, color: "#60a5fa", name: "User"}, {values: history.system, color: "#f87171", name: "System"}], 100, "CPU user and system load over the last 60 samples")}</div><div class="card"><h3><span style="color:var(--purple)">${icon("drive")}</span>MEMORY</h3><div class="metric">${fmtMemory(m.memory)}</div><p>of ${fmtMemory(m.totalMemory)} (${percent}%)</p><div class="memoryBar"><i style="width:${(app / m.totalMemory) * 100}%;background:#a855f7"></i><i style="width:${(m.wired / m.totalMemory) * 100}%;background:#3b82f6"></i><i style="width:${(m.compressed / m.totalMemory) * 100}%;background:#fb923c"></i></div><div class="breakdown"><span><em class="app">App</em> ${fmtMemory(app)}</span><span><em class="wired">Wired</em> ${fmtMemory(m.wired)}</span><span><em class="cached">Cached</em> ${fmtMemory(m.cached)}</span><span><em class="free">Free</em> ${fmtMemory(m.free)}</span><span><em class="compressed">Compressed</em> ${fmtMemory(m.compressed)}</span><span><em class="swap">Swap</em> ${fmtMemory(m.swap)}</span></div></div><div class="card"><h3><span style="color:var(--green)">${icon("wifi")}</span>NETWORK</h3><div class="netLine"><span class="green">↓ DOWNLOAD</span><strong>${fmt(m.download, true)}</strong></div><div class="netLine"><span style="color:var(--blue-soft)">↑ UPLOAD</span><strong>${fmt(m.upload, true)}</strong></div>${chart([{values: history.down, color: "#4ade80", name: "Download"}, {values: history.up, color: "#60a5fa", name: "Upload"}], Math.max(1024, ...history.down, ...history.up), "Network download and upload over the last 60 samples")}<p>Physical en* interfaces</p></div><div class="card"><h3><span style="color:var(--amber)">${icon("power")}</span>POWER</h3><div class="powerMetric">${m.power.percent == null ? "—" : Math.round(m.power.percent) + "%"}</div><p style="text-align:center">${m.power.source === "AC Power" ? "AC Powered" : m.power.source === "Battery Power" ? "On Battery" : escapeHTML(m.power.source)}${m.power.charging ? " · Charging" : ""}</p><dl class="batteryDetails"><div><dt>Cycle Count</dt><dd>${battery.cycles}</dd></div><div><dt>Health</dt><dd>${battery.health}</dd></div></dl><p class="sensorNote">Unavailable sensors show —</p></div></div><div class="processes"><h3>${icon("pulse")} Top Processes (by CPU)</h3><table class="fileTable"><thead><tr><th>PROCESS</th><th>CPU</th><th>MEMORY</th><th>PID</th></tr></thead><tbody>${m.processes.map((p, i) => `<tr><td><span class="rank">${i + 1}</span>${escapeHTML(p.name)}</td><td class="num">${p.cpu.toFixed(1)}%</td><td style="color:var(--purple)">${fmtMemory(p.memory)}</td><td style="color:var(--muted)">${p.pid}</td></tr>`).join("")}</tbody></table><p class="subtitle" style="margin-top:18px;font-size:11px">CPU is sampled between refreshes. Process CPU is reported by macOS ps and may exceed 100% for multiple cores. Memory is an estimate excluding reclaimable cached pages.</p></div>`;
   } catch (e) {
     error(e);
   } finally {
@@ -941,6 +1042,9 @@ $("#appsView").onclick = showApps;
 $("#monitorView").onclick = showMonitor;
 $("#themeView").onclick = showThemes;
 $("#queueView").onclick = showQueue;
+$("#reclaimView").onclick = showReclaim;
+$("#quickSearch").onclick = () => native("quickSearch").catch(error);
+$("#checkUpdates").onclick = () => native("checkUpdates").catch(error);
 $("#permissions").onclick = showPermissions;
 $("#emptyTrash").onclick = async () => {
   try {
@@ -988,6 +1092,7 @@ try {
   const theme = localStorage.getItem("theme");
   if (themes.some((x) => x[0] === theme)) document.body.dataset.theme = theme;
 } catch {}
+native("appearance", { theme: document.body.dataset.theme }).catch(error);
 hydrate();
 saveQueue();
 bindWelcome();

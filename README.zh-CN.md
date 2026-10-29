@@ -4,7 +4,7 @@
 
 DiskScope 是一款在本机运行的 macOS 磁盘分析与清理应用。通过分层矩形树图查看空间占用，查找大文件和开发缓存，检查应用关联文件，并查看实时系统状态。
 
-使用 Swift、AppKit 和本地 WebKit 界面实现。所有已实现功能直接可用，无需账户或付费许可证。应用没有分析遥测、云端后台或网络服务，扫描和清理均在你的 Mac 上执行。
+使用 Swift、AppKit 和本地 WebKit 界面实现。所有已实现功能直接可用，无需账户或付费许可证。应用没有分析遥测或云端后台，扫描、搜索和清理均在你的 Mac 上执行。仅在主动点击检查更新时访问本项目的 GitHub Releases API，不发送个人路径或文件内容。
 
 ## 功能介绍
 
@@ -18,17 +18,27 @@ DiskScope 是一款在本机运行的 macOS 磁盘分析与清理应用。通过
 | 清理队列 | 检查所选路径，经原生确认后移入 Finder 废纸篓 |
 | 应用清理 | 检查已安装应用，选择关联文件，查看卸载残留候选 |
 | 系统监控 | CPU、内存、压缩内存、Swap、物理网卡流量、电池和高 CPU 进程，每两秒刷新 |
-| 界面外观 | 六种本地主题、统一文件类型配色、可拖动的原生窗口顶部区域 |
+| 界面外观 | 八种本地主题、统一文件类型配色、可拖动的原生窗口顶部区域 |
 | 导出报告 | 导出扫描元数据为 CSV |
 | 快捷键 | ⌘F 搜索，⌘Q 退出 |
 
+## 1.1.0 完善内容
+
+- 修复符号链接绕过保护目录、运行中应用父目录保护、Spotlight 截断后筛选漏结果及大文件结果混入目录。
+- 扩展应用关联文件与辅助程序证据检查；系统辅助项、共享数据和不确定候选默认不选中，不提权删除。
+- 新增电池循环次数和健康度、CPU 用户/系统双曲线、网络上传/下载双曲线，以及 Aurora、Ocean 主题。
+- 新增 ⌘⇧Space 全局快速搜索和打开文件/应用的原生面板；⌘F 保持应用内搜索。
+- 新增 Quick Reclaim：从当前扫描生成去重后的缓存、依赖及构建建议，全部默认不勾选，加入队列后另行确认。
+- 新增手动 GitHub 更新检查；该操作不发送个人路径或文件内容。
+- 卸载后刷新应用列表与数量；发布打包支持 macOS 12+ 的双架构通用版本。
+
 ## 构建与运行
 
-可直接从 [GitHub Releases](https://github.com/amtbsl/DiskScope/releases/latest) 下载 Apple Silicon macOS 版本。打开 DMG 后，将 DiskScope 拖入 Applications；也可以解压 ZIP 使用。发布包采用临时签名，未经过 Apple 公证，首次打开的说明见发布页面。
+可直接从 [GitHub Releases](https://github.com/amtbsl/DiskScope/releases/latest) 下载 macOS 应用发布包。打开 DMG 后，将 DiskScope 拖入 Applications；也可以解压 ZIP 使用。发布包采用临时签名，未经过 Apple 公证，首次打开的说明见发布页面。
 
 环境要求：
 
-- macOS 13 或更新版本。
+- macOS 12 或更新版本。
 - Xcode Command Line Tools；尚未安装时运行 `xcode-select --install`。
 - 运行应用不需要 Electron、Node.js 或 Python。测试需要 Python 3 和 Node.js。
 
@@ -39,7 +49,7 @@ zsh scripts/build.sh
 open build/DiskScope.app
 ```
 
-构建面向当前 Mac 的处理器架构。开发和手动验收在 Apple Silicon Mac 上完成，尚未验证 Intel 构建。脚本从源码生成应用图标，并使用本地 ad hoc 签名；构建产物未经 Apple 开发者公证。
+默认构建面向当前 Mac 的处理器架构；发布脚本编译同时包含 Apple Silicon 和 Intel 的通用二进制，最低部署目标为 macOS 12.0。运行验收在 Apple Silicon/macOS 26 上完成，Intel 及 macOS 12–25 的实际运行仍未验证。脚本从源码生成应用图标，并使用本地 ad hoc 签名；构建产物未经 Apple 开发者公证。
 
 安装或更新本地构建的应用时，先退出 DiskScope，再执行：
 
@@ -66,7 +76,7 @@ open /Applications/DiskScope.app
 - 按已分配块 `st_blocks × 512` 计算文件占用，同时保留逻辑大小。硬链接按 inode 去重，符号链接不跟随。APFS 克隆共享块、快照和可清除空间无法精确逐文件归属，扫描合计可能与磁盘存储条不同。
 - 启动卷扫描跳过 `/System/Volumes` 重复挂载、设备节点和外置卷。外置盘需单独扫描。
 - 单个后台扫描线程最多保留 200 万条记录，目录深度上限为 256。达到限制会显示 **Partial scan**，可缩小扫描范围继续检查。
-- 树图只传递有限层次的内容，省略的小条目归入 **Other**。文件列表每页 400 条，搜索最多返回 500 条。
+- 树图只传递有限层次的内容，省略的小条目归入 **Other**。文件列表每页 400 条。搜索先完成筛选和大小排序，再最多显示 500 条；Spotlight 的候选、时间或读取上限会明确标记为部分结果。
 - Spotlight 搜索依赖系统索引，其目录大小不代表递归内容大小。
 - 应用关联文件和残留判断采用启发式规则。共享应用组和残留候选不自动勾选；请先检查路径。自定义目录和部分辅助工具可能无法识别。
 - 常规清理通过 Finder 可恢复的废纸篓执行，不使用 `sudo`。系统保护路径、顶层个人文件夹、运行中的应用和 DiskScope 自身不能加入删除队列。**Empty Trash** 在输入 `EMPTY` 确认后，仅永久清空当前用户的 `~/.Trash`。
@@ -94,7 +104,7 @@ zsh scripts/test.sh
 
 脚本构建应用，执行扫描与树图回归测试、JavaScript 语法检查、真实系统状态采集，以及专用 UUID 文件的废纸篓移入与恢复测试。不会删除已有个人文件。手动检查和未验证情况见 [验收记录](docs/VALIDATION.md)。
 
-运行 `zsh scripts/release.sh` 可为当前 Mac 的架构打包发布版本，在 `build/releases/` 下生成 DMG、ZIP 和 SHA-256 校验文件。
+运行 `zsh scripts/release.sh` 可为 Apple Silicon 与 Intel 打包通用发布版本，在 `build/releases/` 下生成 DMG、ZIP 和 SHA-256 校验文件。
 
 ## 项目来源
 

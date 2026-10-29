@@ -58,6 +58,7 @@
           ><button id="choose">
             <span data-icon="folder"></span>Choose Folder
           </button>
+          <button id="reclaimView"><span data-icon="refresh"></span>Quick Reclaim</button>
         </section>
         <section class="storage">
           <h3>DISK STORAGE</h3>
@@ -95,7 +96,7 @@
           <h3>FILE TYPES</h3>
           <div id="legendList"></div>
         </section>
-        <footer>DiskScope v1.0.0 <span>Local · All features</span></footer>
+        <footer>DiskScope v1.1.0 <span>Local · All features</span><button id="quickSearch" title="Global quick search · ⌘⇧Space">Quick Search <kbd>⌘⇧Space</kbd></button><button id="checkUpdates">Check for Updates…</button></footer>
       </aside>
       <main id="main">
         <div class="welcome">
@@ -122,6 +123,7 @@
     <div id="context" hidden></div>
     <div id="toast" role="status" hidden></div>
     <script src="treemap.js"></script>
+    <script src="ui-state.js"></script>
     <script src="app.js"></script>
   </body>
 </html>
