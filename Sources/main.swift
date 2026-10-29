@@ -25,6 +25,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
     var web: WKWebView!
     let windowDrag = WindowDragView()
     let work = DispatchQueue(label:"local.diskscope.work",qos:.userInitiated)
+    let appWork = DispatchQueue(label:"local.diskscope.apps",qos:.utility)
+    let monitorWork = DispatchQueue(label:"local.diskscope.monitor",qos:.utility)
+    let searchWork = DispatchQueue(label:"local.diskscope.search",qos:.userInitiated)
+    let quickSearch = QuickSearchController()
+    var checkingUpdates = false
     let scanningQueue = DispatchQueue(label:"local.diskscope.scan",qos:.utility)
     var nodes: [DiskEntry] = []
     var control: ScanControl?
@@ -35,6 +40,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
         NSApp.setActivationPolicy(.regular)
         let menu = NSMenu(), item = NSMenuItem(), appMenu = NSMenu()
         appMenu.addItem(withTitle:"About DiskScope", action:#selector(about), keyEquivalent:"")
+        appMenu.addItem(withTitle:"Check for Updates…", action:#selector(checkUpdatesMenu), keyEquivalent:"")
         appMenu.addItem(.separator())
         appMenu.addItem(withTitle:"Quit DiskScope",action:#selector(NSApplication.terminate(_:)),keyEquivalent:"q")
         item.submenu = appMenu; menu.addItem(item)
@@ -43,6 +49,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
         edit.submenu = editMenu; menu.addItem(edit)
         let view = NSMenuItem(title:"View",action:nil,keyEquivalent:""), viewMenu = NSMenu(title:"View")
         viewMenu.addItem(withTitle:"Search",action:#selector(focusSearch),keyEquivalent:"f")
+        viewMenu.addItem(withTitle:"Quick Search (⌘⇧Space)",action:#selector(showQuickSearch),keyEquivalent:"")
         view.submenu = viewMenu; menu.addItem(view); NSApp.mainMenu = menu
         let config = WKWebViewConfiguration(); config.userContentController.add(self,name:"native")
         web = WKWebView(frame:.zero,configuration:config); web.navigationDelegate = self
@@ -59,11 +66,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
             web.loadFileURL(url,allowingReadAccessTo:url.deletingLastPathComponent())
         }
         window.makeKeyAndOrderFront(nil); NSApp.activate(ignoringOtherApps:true)
+        quickSearch.registerShortcut()
     }
-    @objc func about() { NSApp.orderFrontStandardAboutPanel(options:[.applicationName:"DiskScope",.applicationVersion:"1.0.0",.credits:NSAttributedString(string:"Independent local disk analyzer. All features included.")]) }
+    @objc func about() { NSApp.orderFrontStandardAboutPanel(options:[.applicationName:"DiskScope",.applicationVersion:"1.1.0",.credits:NSAttributedString(string:"Independent local disk analyzer. All features included.")]) }
     @objc func focusSearch() { web.evaluateJavaScript("document.querySelector('#search').focus()") }
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
-    func applicationWillTerminate(_ notification: Notification) { control?.cancel() }
+    func applicationWillTerminate(_ notification: Notification) { control?.cancel(); quickSearch.unregisterShortcut() }
     func webView(_ webView: WKWebView, decidePolicyFor action: WKNavigationAction, decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
         decisionHandler(action.request.url?.isFileURL == true ? .allow : .cancel)
     }
@@ -108,6 +116,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
         case "trash": reviewTrash(id,args)
         case "emptyTrash": emptyTrash(id)
         case "export": exportScan(id)
+        case "quickSearch": quickSearch.show(); send(id,result:["opened":true])
+        case "appearance":
+            let theme = args["theme"] as? String ?? "dark"
+            let appearance = NSAppearance(named: ["light", "aurora"].contains(theme) ? .aqua : .darkAqua)
+            window.appearance = appearance; quickSearch.appearance = appearance
+            send(id,result:["ok":true])
+        case "checkUpdates": beginUpdateCheck(id)
         case "permissions":
             NSWorkspace.shared.open(URL(string:"x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles")!); send(id,result:["ok":true])
         case "copy":
@@ -115,7 +130,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
             NSPasteboard.general.clearContents(); NSPasteboard.general.setString(path,forType:.string)
             send(id,result:["ok":true])
         default:
-            work.async {
+            let externalSearch = action == "search" && (args["scope"] as? String ?? "scan") != "scan"
+            let queue = action == "monitor" ? monitorWork : ["apps", "appDetails", "orphans"].contains(action) ? appWork : externalSearch ? searchWork : work
+            queue.async {
                 do { let result = try self.perform(action,args); self.send(id,result:result) }
                 catch { self.send(id,error:error.localizedDescription) }
             }
@@ -167,20 +184,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
         case "search":
             let query = (args["query"] as? String ?? "").lowercased(), filters = args["filters"] as? [String] ?? [], type = args["type"] as? String ?? ""
             let scope = args["scope"] as? String ?? "scan"
-            if scope != "scan" && !query.isEmpty {
-                let safe = query.replacingOccurrences(of:"\\",with:"\\\\").replacingOccurrences(of:"\"",with:"\\\"").replacingOccurrences(of:"*",with:"\\*").replacingOccurrences(of:"?",with:"\\?")
-                var argv = ["-0"]
-                if scope == "home" { argv += ["-onlyin",NSHomeDirectory()] }
-                argv.append("kMDItemFSName == \"*\(safe)*\"cd")
-                let paths = run("/usr/bin/mdfind",argv,timeout:8).split(separator:"\0").prefix(500)
-                let rows = paths.compactMap { path -> [String:Any]? in
-                    let p = String(path); var st = stat(); guard lstat(p,&st) == 0 else { return nil }
-                    let size = Int64(st.st_blocks)*512, cat = category(p), t = tags(p,size,cat)
-                    if !filters.isEmpty && Set(filters).isDisjoint(with:t) { return nil }
-                    if !type.isEmpty && cat != type { return nil }
-                    return DiskEntry(path:p,name:(p as NSString).lastPathComponent,directory:(st.st_mode&S_IFMT)==S_IFDIR,symlink:(st.st_mode&S_IFMT)==S_IFLNK,bytes:size,logical:Int64(st.st_size),modified:Double(st.st_mtimespec.tv_sec),category:cat,tags:t).json(-1)
-                }
-                return ["rows":rows,"total":rows.count,"source":"Spotlight · up to 500 indexed matches; directory size is not recursive"]
+            if scope != "scan" {
+                return spotlightSearch(query:query,scope:scope,filters:filters,type:type,large:args["large"] as? Bool ?? false)
             }
             let matches = nodes.indices.filter { n in
                 let e = nodes[n]
@@ -191,7 +196,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
         case "appDetails":
             guard let path = args["path"] as? String, let app = installedApps().first(where: { $0.path == path }) else { return [] as [[String:Any]] }
             return appRelated(app)
-        case "orphans": return orphanCandidates()
+        case "orphans": return orphanReport()
         default: throw NSError(domain:"DiskScope",code:1,userInfo:[NSLocalizedDescriptionKey:"Unknown action: \(action)"])
         }
     }
@@ -199,7 +204,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
         let paths = normalizeQueue(args["paths"] as? [String] ?? [])
         guard !paths.isEmpty, paths.allSatisfy(safeToTrash) else { send(id,error:"Protected paths cannot be removed. Select individual files or folders in your home, Applications or an external volume."); return }
         let running = NSWorkspace.shared.runningApplications.compactMap { $0.bundleURL?.path }
-        if paths.contains(where: { running.contains($0) }) { send(id,error:"Quit the selected application before uninstalling it."); return }
+        if runningAppConflict(paths:paths,running:running) { send(id,error:"Quit the selected application before uninstalling it."); return }
         let alert = NSAlert(); alert.messageText = "Move \(paths.count) selected items to Trash?"
         alert.informativeText = "Review every path below. You can restore these items from Finder's Trash.\n\n" + paths.prefix(12).joined(separator:"\n") + (paths.count > 12 ? "\n… and \(paths.count-12) more items listed in your queue." : "")
         alert.alertStyle = .warning; alert.addButton(withTitle:"Move to Trash"); alert.addButton(withTitle:"Cancel")
@@ -207,8 +212,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
             guard response == .alertFirstButtonReturn else { self.send(id,result:["cancelled":true]); return }
             self.work.async {
                 var moved: [String] = [], failures: [[String:String]] = []
+                let runningNow = DispatchQueue.main.sync { NSWorkspace.shared.runningApplications.compactMap { $0.bundleURL?.path } }
                 for p in paths {
-                    // Revalidate after review, and never run a privileged delete.
+                    // Revalidate current paths and running-app ancestry after user review.
+                    guard !runningAppConflict(paths:[p],running:runningNow) else { failures.append(["path":p,"error":"Quit the application before removing its files."]); continue }
                     guard safeToTrash(p) else { failures.append(["path":p,"error":"Protected path"]); continue }
                     do { try FileManager.default.trashItem(at:URL(fileURLWithPath:p),resultingItemURL:nil); moved.append(p) }
                     catch { failures.append(["path":p,"error":error.localizedDescription]) }
@@ -234,6 +241,36 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
                 do { for name in try FileManager.default.contentsOfDirectory(atPath:trash) { do { try FileManager.default.removeItem(atPath:trash+"/"+name) } catch { errors.append(error.localizedDescription) } } }
                 catch { errors.append(error.localizedDescription) }
                 self.send(id,result:["errors":errors])
+            }
+        }
+    }
+    @objc func showQuickSearch() { quickSearch.show() }
+    @objc func checkUpdatesMenu() { beginUpdateCheck(nil) }
+    func beginUpdateCheck(_ id: String?) {
+        guard !checkingUpdates else { if let id = id { send(id,result:["checked":false,"checking":true]) }; return }
+        checkingUpdates = true
+        ProjectRelease.fetch { result in
+            DispatchQueue.main.async {
+                self.checkingUpdates = false
+                let alert = NSAlert()
+                var page = ProjectRelease.releases
+                switch result {
+                case .success(let release):
+                    let current = Bundle.main.object(forInfoDictionaryKey:"CFBundleShortVersionString") as? String ?? "1.1.0"
+                    let available = AppVersion(current).map { release.version > $0 } ?? false
+                    alert.messageText = available ? "DiskScope \(release.tag) is available" : "DiskScope is up to date"
+                    alert.informativeText = "Installed: \(current) · Latest public release: \(release.tag).\nDownloads are managed on this project's GitHub Releases page."
+                    page = release.page
+                    if let id = id { self.send(id,result:["checked":true,"latest":release.tag,"updateAvailable":available]) }
+                case .failure(let error):
+                    alert.messageText = "Could not check for updates"
+                    alert.informativeText = error.localizedDescription + "\nYou can check the project's Releases page manually."
+                    if let id = id { self.send(id,result:["checked":false,"error":error.localizedDescription]) }
+                }
+                alert.addButton(withTitle:"Open Releases"); alert.addButton(withTitle:"Close")
+                alert.beginSheetModal(for:self.window) { response in
+                    if response == .alertFirstButtonReturn { NSWorkspace.shared.open(page) }
+                }
             }
         }
     }
