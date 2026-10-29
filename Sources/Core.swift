@@ -114,18 +114,40 @@ final class Scanner {
 }
 
 func canonical(_ path: String) -> String { URL(fileURLWithPath: path).standardizedFileURL.path }
+// A removal operates on the directory entry, so resolve parent aliases while
+// deliberately preserving a leaf symlink. Appending a component also avoids //
+// when the resolved parent happens to be the filesystem root.
+func removalPath(_ path: String) -> String {
+    let url = URL(fileURLWithPath: canonical(path))
+    if url.path == "/" { return "/" }
+    return url.deletingLastPathComponent().resolvingSymlinksInPath()
+        .appendingPathComponent(url.lastPathComponent).standardizedFileURL.path
+}
+func pathContains(_ ancestor: String, _ descendant: String) -> Bool {
+    // Most Mac volumes ignore case. Be conservative on case-sensitive volumes
+    // too, rather than accepting a case alias of a protected directory entry.
+    let a = ancestor.lowercased(), d = descendant.lowercased()
+    return a == d || d.hasPrefix(a == "/" ? "/" : a + "/")
+}
 func safeToTrash(_ path: String) -> Bool {
-    let p = canonical(path), home = NSHomeDirectory()
+    let p = canonical(path), home = canonical(NSHomeDirectory())
     let protected = ["/", "/Applications", "/Users", "/Library", "/Volumes", "/System", "/bin", "/sbin", "/usr", "/private", "/opt", home, home + "/Library", home + "/.Trash", home + "/Desktop", home + "/Documents", home + "/Downloads", home + "/Pictures", home + "/Music", home + "/Movies"]
-    if protected.contains(p) { return false }
-    // Resolve the parent as well: a symlinked directory must not bypass protected paths.
-    let parent = URL(fileURLWithPath: p).deletingLastPathComponent().resolvingSymlinksInPath().path
-    let resolved = parent + "/" + URL(fileURLWithPath:p).lastPathComponent
-    for candidate in [p, resolved] {
-        if ["/System/","/bin/","/sbin/","/usr/","/private/","/dev/"].contains(where: { candidate.hasPrefix($0) }) { return false }
-        if candidate == Bundle.main.bundlePath || candidate.hasPrefix(home + "/.Trash/") { return false }
+    let bundle = URL(fileURLWithPath: Bundle.main.bundlePath).resolvingSymlinksInPath().standardizedFileURL.path
+    for candidate in [p, removalPath(p)] {
+        if protected.contains(where: { $0.lowercased() == candidate.lowercased() }) { return false }
+        if ["/System", "/bin", "/sbin", "/usr", "/private", "/dev"].contains(where: { pathContains($0, candidate) }) { return false }
+        if pathContains(bundle, candidate) || pathContains(candidate, bundle) || pathContains(home + "/.Trash", candidate) { return false }
+        if ![home, "/Applications", "/Volumes"].contains(where: { candidate.hasPrefix($0 + "/") }) { return false }
     }
-    return p.hasPrefix(home + "/") || p.hasPrefix("/Applications/") || p.hasPrefix("/Volumes/")
+    return true
+}
+func runningAppConflict(paths: [String], running: [String]) -> Bool {
+    let bundles = running.map { URL(fileURLWithPath: $0).resolvingSymlinksInPath().standardizedFileURL.path }
+    return paths.contains { path in
+        [canonical(path), removalPath(path)].contains { candidate in
+            bundles.contains { pathContains(candidate, $0) || pathContains($0, candidate) }
+        }
+    }
 }
 func normalizeQueue(_ paths: [String]) -> [String] {
     let sorted = Array(Set(paths.map(canonical))).sorted { $0.count < $1.count }
