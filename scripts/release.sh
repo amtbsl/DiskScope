@@ -1,10 +1,11 @@
 #!/bin/zsh
 set -euo pipefail
 cd "${0:A:h}/.."
-zsh scripts/build.sh
+DISKSCOPE_ARCHS="${DISKSCOPE_ARCHS:-arm64 x86_64}" zsh scripts/build.sh
 app="$PWD/build/DiskScope.app"
 version=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$app/Contents/Info.plist")
-arch=$(uname -m)
+arch=$(lipo -archs "$app/Contents/MacOS/DiskScope")
+[[ "$arch" == *' '* ]] && arch=universal
 name="DiskScope-${version}-macos-${arch}"
 out="$PWD/build/releases/$name"
 mkdir -p "$out"
