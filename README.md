@@ -4,7 +4,7 @@
 
 DiskScope is a local macOS disk analyzer and cleanup app. Explore storage with a nested treemap, find large files and development caches, review app-related files, and watch live system metrics.
 
-Built with Swift, AppKit, and a local WebKit interface. All implemented features are available without an account or paid license. The app has no analytics, cloud backend, or network service; scanning and cleanup run on your Mac.
+Built with Swift, AppKit, and a local WebKit interface. All implemented features are available without an account or paid license. The app has no analytics or cloud backend; scanning, search, and cleanup run on your Mac. The explicit **Check for Updates** action contacts only this project’s public GitHub Releases API; no scan paths or file data are sent.
 
 ## Features
 
@@ -17,18 +17,21 @@ Built with Swift, AppKit, and a local WebKit interface. All implemented features
 | Development filters | Find Node.js, Xcode, build artifacts, Android, Docker, virtual machines, caches, AI models, and more |
 | Cleanup queue | Review selected paths and move items to Finder's Trash with native confirmation |
 | App cleanup | Inspect installed apps, select related files, and review leftover candidates |
-| System monitor | CPU, memory, compression, swap, physical network interfaces, battery, and top processes; refreshes every two seconds |
-| Appearance | Six local themes, consistent file-type colors, and a draggable native window header |
+| System monitor | CPU user/system curves, memory, swap, download/upload curves, battery cycles and health when available, and top processes |
+| Quick Search | ⌘⇧Space opens a native global file/app search panel; Return opens and Finder reveal is available |
+| Quick Reclaim | Review deduplicated cache/dependency/build suggestions from a completed scan; all choices start unchecked |
+| Updates | Explicit GitHub release check from the app menu or sidebar |
+| Appearance | Eight local themes, including independently authored Aurora and Ocean, consistent file-type colors, and a draggable native window header |
 | Reports | Export scan metadata to CSV |
 | Shortcuts | ⌘F to search; ⌘Q to quit |
 
 ## Build and run
 
-Download the ready-to-use Apple Silicon macOS app from [GitHub Releases](https://github.com/amtbsl/DiskScope/releases/latest). Open the DMG and drag DiskScope into Applications, or extract the ZIP. Release builds are ad hoc signed and not Apple-notarized; see the release notes for installation details.
+Download macOS app packages from [GitHub Releases](https://github.com/amtbsl/DiskScope/releases/latest). Open the DMG and drag DiskScope into Applications, or extract the ZIP. Release builds are ad hoc signed and not Apple-notarized; see the release notes for installation details.
 
 Requirements:
 
-- macOS 13 or later.
+- macOS 12 or later.
 - Xcode Command Line Tools (`xcode-select --install` if not already installed).
 - No Electron, Node.js, or Python runtime is needed to run the app. Python 3 and Node.js are used only for tests.
 
@@ -39,7 +42,7 @@ zsh scripts/build.sh
 open build/DiskScope.app
 ```
 
-The build targets the architecture of your Mac. Development and manual validation have been performed on an Apple Silicon Mac with macOS; Intel builds have not been verified. The build script applies an ad hoc signature and generates the app icon from source. Builds are not Apple-notarized.
+The default build targets your Mac’s architecture. Release packaging compiles a universal Apple Silicon + Intel executable with a macOS 12.0 deployment target. Runtime checks are performed on Apple Silicon/macOS 26; Intel and macOS 12–25 runtime behavior remain unverified. The build script applies an ad hoc signature and generates the app icon from source. Builds are not Apple-notarized.
 
 To install or update your locally built copy, quit DiskScope first:
 
@@ -66,9 +69,9 @@ The installer preserves a previous DiskScope build under `build/` and refuses to
 - File sizes use allocated blocks (`st_blocks × 512`) and also retain logical sizes. Hard links are deduplicated by inode; symlinks are not followed. APFS clones, snapshots, and purgeable space prevent exact reconciliation with volume-level storage totals.
 - Startup-volume scans skip duplicate `/System/Volumes` mounts, device nodes, and external volumes. Scan external storage separately.
 - A single background scanner retains up to two million entries and a maximum directory depth of 256. Reaching a limit produces a **Partial scan** notice; select a smaller folder to continue.
-- The treemap sends a bounded hierarchy to the interface and groups omitted small entries under **Other**. File lists have 400 entries per page; searches return at most 500 results.
+- The treemap sends a bounded hierarchy to the interface and groups omitted small entries under **Other**. File lists have 400 entries per page. Search filters and size ranking are applied before the 500-row display limit; bounded Spotlight enumeration explicitly reports partial results.
 - Spotlight results depend on the system index. A directory's Spotlight size is not its recursive content size.
-- Related-file and leftover detection is heuristic. Shared app groups and leftover candidates are not automatically selected. Inspect paths before cleanup; custom locations and helper tools may be missed.
+- Related-file discovery includes exact app data names, code-signature groups, and launch/helper metadata with executable ownership evidence. System/helper/shared/uncertain items are not automatically selected. System helpers are review-only: the app does not elevate privileges or unload privileged services. Leftover detection is heuristic and low-confidence reverse-DNS names are only review candidates, never proof that data is unused. Inspect paths before cleanup; custom locations and helper tools may be missed.
 - Normal cleanup uses Finder's recoverable Trash without `sudo`. Protected system paths, top-level personal folders, running apps, and DiskScope itself cannot be queued for removal. **Empty Trash** permanently deletes only this user's `~/.Trash` after a typed `EMPTY` confirmation.
 - Memory metrics are Mach VM estimates in GiB/MiB. Process CPU comes from macOS `ps` and can exceed 100% for multi-core workloads. Network metrics use physical `en*` interfaces and exclude VPN tunnels.
 
@@ -94,7 +97,11 @@ zsh scripts/test.sh
 
 This builds the app, runs scanner and treemap regressions, checks JavaScript syntax, samples real system metrics, and exercises a reversible Trash round trip with a newly created UUID-named test file. It does not delete existing personal files. See [validation notes](docs/VALIDATION.md) for manual checks and unverified cases.
 
-To package a local release for your Mac's architecture, run `zsh scripts/release.sh`. It creates a DMG, a ZIP, and SHA-256 checksums under `build/releases/`.
+To package a universal macOS release, run `zsh scripts/release.sh`. It creates a DMG, a ZIP, and SHA-256 checksums under `build/releases/`.
+
+## Version 1.1.0
+
+This update fixes protected-directory alias checks, running-app ancestry protection, Spotlight filter-before-limit ranking, large-file directory exclusion, and installed-app refresh after removal. It adds the local parity features above while preserving native window dragging and editable search fields.
 
 ## Project origin
 
